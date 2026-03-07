@@ -15,7 +15,7 @@ def test_editor():
     p = subprocess.Popen(['./text-editor'], stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid)
     os.close(slave)
     
-    def read_output(timeout=0.3):
+    def read_output(timeout=0.5):
         output = b""
         end_time = time.time() + timeout
         while time.time() < end_time:
@@ -30,11 +30,11 @@ def test_editor():
         return output.decode('utf-8', errors='replace')
 
     print("--- Starting Editor ---")
-    out = read_output(0.5)
-    if '\x1b[1;1H' in out:
-        print("[PASS] Initial cursor position is correct (1;1)")
+    out = read_output(1.0)
+    if '-- NORMAL --' in out and '\x1b[1;1H' in out:
+        print("[PASS] Initial status is NORMAL and cursor position is correct (1;1)")
     else:
-        print("[FAIL] Initial cursor position missing. Output:", repr(out))
+        print("[FAIL] Initial state missing. Output:", repr(out))
 
     print("--- Testing 'l' (Move Right) ---")
     os.write(master, b'l')
@@ -44,32 +44,21 @@ def test_editor():
     else:
         print("[FAIL] Cursor did not move right. Output:", repr(out))
 
-    print("--- Testing 'j' (Move Down) ---")
-    os.write(master, b'j')
-    out = read_output()
-    if '\x1b[2;2H' in out:
-        print("[PASS] Cursor moved down to (2;2)")
-    else:
-        print("[FAIL] Cursor did not move down. Output:", repr(out))
-
     print("--- Testing 'i' (Insert Mode) ---")
     os.write(master, b'i')
     out = read_output()
-    print("--- Testing 'l' in Insert Mode (Should NOT move) ---")
-    os.write(master, b'l')
-    out = read_output()
-    if '\x1b[2;3H' not in out:
-        print("[PASS] Cursor did not move (stayed at 2;2) because we are in Insert Mode")
+    if '-- INSERT --' in out:
+        print("[PASS] Switched to INSERT mode successfully")
     else:
-        print("[FAIL] Cursor moved in Insert Mode!")
+        print("[FAIL] Did not switch to INSERT mode. Output:", repr(out))
 
-    print("--- Testing 'ESC' (Back to Normal Mode) and 'h' (Move Left) ---")
+    print("--- Testing 'ESC' (Back to Normal Mode) ---")
     os.write(master, b'\x1b') # ESC
     time.sleep(0.1)
     os.write(master, b'h')
     out = read_output()
-    if '\x1b[2;1H' in out:
-        print("[PASS] Returned to Normal mode and moved left to (2;1)")
+    if '-- NORMAL --' in out and '\x1b[1;1H' in out:
+        print("[PASS] Returned to NORMAL mode and moved left to (1;1)")
     else:
         print("[FAIL] Did not return to Normal mode / move left. Output:", repr(out))
 

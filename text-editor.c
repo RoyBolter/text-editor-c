@@ -115,8 +115,12 @@ int getWindowSize(int* rows, int* cols) {
 void drawRows() {
   int y;
   for (y=0; y<E.screenRows; y++) {
-    write(STDOUT_FILENO, "~", 1);
-    if (y < E.screenRows - 1) {
+    if (y == E.screenRows - 1) {
+      char status[80];
+      int len = snprintf(status, sizeof(status), "\x1b[7m %s \x1b[0m", E.mode == INSERT ? "-- INSERT --" : "-- NORMAL --");
+      write(STDOUT_FILENO, status, len);
+    } else {
+      write(STDOUT_FILENO, "~", 1);
       write(STDOUT_FILENO, "\r\n", 2);
     }
   }
