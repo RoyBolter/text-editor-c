@@ -41,14 +41,20 @@ struct config E;
 
 // ROW OPERATIONS
 
-void editorAppendRow(char *s, size_t len) {
+void editorInsertRow(int at, char *s, size_t len) {
+  if (at < 0 || at > E.numrows) return;
   E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
-  int at = E.numrows;
+  memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
+
   E.row[at].size = len;
   E.row[at].chars = malloc(len + 1);
   memcpy(E.row[at].chars, s, len);
   E.row[at].chars[len] = '\0';
   E.numrows++;
+}
+
+void editorAppendRow(char *s, size_t len) {
+  editorInsertRow(E.numrows, s, len);
 }
 
 void editorRowInsertChar(erow *row, int at, int c) {
@@ -61,10 +67,24 @@ void editorRowInsertChar(erow *row, int at, int c) {
 
 void editorInsertChar(int c) {
   if (E.cy == E.numrows) {
-    editorAppendRow("", 0);
+    editorInsertRow(E.numrows, "", 0);
   }
   editorRowInsertChar(&E.row[E.cy], E.cx, c);
   E.cx++;
+}
+
+void editorInsertNewline() {
+  if (E.cx == 0) {
+    editorInsertRow(E.cy, "", 0);
+  } else {
+    erow *row = &E.row[E.cy];
+    editorInsertRow(E.cy + 1, &row->chars[E.cx], row->size - E.cx);
+    row = &E.row[E.cy];
+    row->size = E.cx;
+    row->chars[row->size] = '\0';
+  }
+  E.cy++;
+  E.cx = 0;
 }
 
 void editorRowDelChar(erow *row, int at) {
@@ -206,19 +226,28 @@ void refreshEditor() {
 // INPUT
 
 void moveCursor(char key) {
+  erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
+
   switch (key) {
     case 'h':
       if (E.cx > 0) E.cx--;
       break;
     case 'l':
-      if (E.cx < E.screenCols - 1) E.cx++;
+      if (row && E.cx < row->size) E.cx++;
+      else if (!row && E.cx < E.screenCols - 1) E.cx++;
       break;
     case 'k':
       if (E.cy > 0) E.cy--;
       break;
     case 'j':
-      if (E.cy < E.screenRows - 1) E.cy++;
+      if (E.cy < E.numrows) E.cy++;
       break;
+  }
+
+  row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
+  int rowlen = row ? row->size : 0;
+  if (E.cx > rowlen) {
+    E.cx = rowlen;
   }
 }
 
@@ -255,7 +284,7 @@ void processKeypress() {
         editorDelCharLeft();
         break;
       case '\r':
-        // Newline support omitted for simplicity in this increment
+        editorInsertNewline();
         break;
       case CTRL_KEY('q'): // Allow quitting in insert mode too for convenience
         write(STDOUT_FILENO, "\x1b[2J", 4);

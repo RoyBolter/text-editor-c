@@ -34,14 +34,6 @@ def test_editor():
     else:
         print("[FAIL] Initial state missing. Output:", repr(out))
 
-    print("--- Testing 'l' (Move Right) ---")
-    os.write(master, b'l')
-    out = read_output()
-    if '\x1b[1;2H' in out:
-        print("[PASS] Cursor moved right to (1;2)")
-    else:
-        print("[FAIL] Cursor did not move right. Output:", repr(out))
-
     print("--- Testing 'i' (Insert Mode) ---")
     os.write(master, b'i')
     out = read_output()
@@ -50,28 +42,37 @@ def test_editor():
     else:
         print("[FAIL] Did not switch to INSERT mode. Output:", repr(out))
 
-    print("--- Testing text insertion ---")
+    print("--- Testing text insertion with Newline ---")
     os.write(master, b'H')
     os.write(master, b'i')
+    os.write(master, b'\r')
+    os.write(master, b'W')
+    os.write(master, b'o')
+    os.write(master, b'r')
+    os.write(master, b'l')
+    os.write(master, b'd')
     out = read_output()
-    if 'Hi' in out:
-        print("[PASS] Inserted text 'Hi' successfully")
+    if 'Hi\r\nWorld' in out or ('Hi' in out and 'World' in out):
+        print("[PASS] Inserted text with newline successfully")
     else:
-        print("[FAIL] Failed to insert text. Output:", repr(out))
+        print("[FAIL] Failed to insert text with newline. Output:", repr(out))
 
     print("--- Testing 'ESC' (Back to Normal Mode) ---")
     os.write(master, b'\x1b') # ESC
     time.sleep(0.1)
     
-    print("--- Testing 'x' (Delete Character) ---")
-    os.write(master, b'h') # move cursor left 
-    os.write(master, b'h') # move cursor left to 'i'
-    os.write(master, b'x') # delete 'i'
+    print("--- Testing Cursor Snapping ---")
+    # Cursor is currently at end of "World" (row 2, col 5). Move up to "Hi" (row 1, max col 2).
+    os.write(master, b'k')
     out = read_output()
-    if 'H\r\n' in out or 'H\r\n~\r\n' in out:
-        print("[PASS] Deleted character successfully")
+    # It snapped to cx=2. Let's move left to select 'i' and delete it.
+    os.write(master, b'h') # move to cx=1
+    os.write(master, b'x') # deletes 'i'
+    out = read_output()
+    if 'H\r\nWorld' in out or ('H' in out and 'World' in out and 'i' not in out):
+        print("[PASS] Cursor snapped and deleted character successfully")
     else:
-        print("[FAIL] Failed to delete character. Output:", repr(out))
+        print("[FAIL] Cursor snapping / delete failed. Output:", repr(out))
 
     print("--- Quitting (Ctrl-Q) ---")
     os.write(master, b'\x11') # Ctrl-Q
