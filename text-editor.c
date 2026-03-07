@@ -20,17 +20,73 @@ enum editorMode {
 
 // STRUCTS
 
+typedef struct erow {
+  int size;
+  char *chars;
+} erow;
+
 struct termios orig_termios;
 
 struct config {
   int cx, cy;
   int screenRows;
   int screenCols;
+  int numrows;
+  erow *row;
   int mode;
   struct termios orig_termios;
 };
 
 struct config E;
+
+// ROW OPERATIONS
+
+void editorAppendRow(char *s, size_t len) {
+  E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
+  int at = E.numrows;
+  E.row[at].size = len;
+  E.row[at].chars = malloc(len + 1);
+  memcpy(E.row[at].chars, s, len);
+  E.row[at].chars[len] = '\0';
+  E.numrows++;
+}
+
+void editorRowInsertChar(erow *row, int at, int c) {
+  if (at < 0 || at > row->size) at = row->size;
+  row->chars = realloc(row->chars, row->size + 2);
+  memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);
+  row->size++;
+  row->chars[at] = c;
+}
+
+void editorInsertChar(int c) {
+  if (E.cy == E.numrows) {
+    editorAppendRow("", 0);
+  }
+  editorRowInsertChar(&E.row[E.cy], E.cx, c);
+  E.cx++;
+}
+
+void editorRowDelChar(erow *row, int at) {
+  if (at < 0 || at >= row->size) return;
+  memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+  row->size--;
+}
+
+void editorDelCharLeft() {
+  if (E.cy == E.numrows) return;
+  if (E.cx == 0) return;
+  erow *row = &E.row[E.cy];
+  editorRowDelChar(row, E.cx - 1);
+  E.cx--;
+}
+
+void editorDelCharUnder() {
+  if (E.cy == E.numrows) return;
+  erow *row = &E.row[E.cy];
+  if (E.cx >= row->size) return;
+  editorRowDelChar(row, E.cx);
+}
 
 // TERMINAL FUNCTIONS
 
@@ -120,7 +176,13 @@ void drawRows() {
       int len = snprintf(status, sizeof(status), "\x1b[7m %s \x1b[0m", E.mode == INSERT ? "-- INSERT --" : "-- NORMAL --");
       write(STDOUT_FILENO, status, len);
     } else {
-      write(STDOUT_FILENO, "~", 1);
+      if (y < E.numrows) {
+        int len = E.row[y].size;
+        if (len > E.screenCols) len = E.screenCols;
+        write(STDOUT_FILENO, E.row[y].chars, len);
+      } else {
+        write(STDOUT_FILENO, "~", 1);
+      }
       write(STDOUT_FILENO, "\r\n", 2);
     }
   }
@@ -173,6 +235,9 @@ void processKeypress() {
       case 'i':
         E.mode = INSERT;
         break;
+      case 'x':
+        editorDelCharUnder();
+        break;
       case 'h':
       case 'j':
       case 'k':
@@ -185,10 +250,22 @@ void processKeypress() {
       case ESC_KEY:
         E.mode = NORMAL;
         break;
+      case 127: // BACKSPACE
+      case CTRL_KEY('h'):
+        editorDelCharLeft();
+        break;
+      case '\r':
+        // Newline support omitted for simplicity in this increment
+        break;
       case CTRL_KEY('q'): // Allow quitting in insert mode too for convenience
         write(STDOUT_FILENO, "\x1b[2J", 4);
         write(STDOUT_FILENO, "\x1b[H", 3);
         exit(0);
+        break;
+      default:
+        if (!iscntrl(c)) {
+          editorInsertChar(c);
+        }
         break;
     }
   }
@@ -197,6 +274,8 @@ void processKeypress() {
 void init() {
   E.cx = 0;
   E.cy = 0;
+  E.numrows = 0;
+  E.row = NULL;
   E.mode = NORMAL;
   if (getWindowSize(&E.screenRows, &E.screenCols) == -1) die("getWindowSize");
 }

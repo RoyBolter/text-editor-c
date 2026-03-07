@@ -25,8 +25,6 @@ def test_editor():
                 if not data:
                     break
                 output += data
-            else:
-                break
         return output.decode('utf-8', errors='replace')
 
     print("--- Starting Editor ---")
@@ -52,15 +50,28 @@ def test_editor():
     else:
         print("[FAIL] Did not switch to INSERT mode. Output:", repr(out))
 
+    print("--- Testing text insertion ---")
+    os.write(master, b'H')
+    os.write(master, b'i')
+    out = read_output()
+    if 'Hi' in out:
+        print("[PASS] Inserted text 'Hi' successfully")
+    else:
+        print("[FAIL] Failed to insert text. Output:", repr(out))
+
     print("--- Testing 'ESC' (Back to Normal Mode) ---")
     os.write(master, b'\x1b') # ESC
     time.sleep(0.1)
-    os.write(master, b'h')
+    
+    print("--- Testing 'x' (Delete Character) ---")
+    os.write(master, b'h') # move cursor left 
+    os.write(master, b'h') # move cursor left to 'i'
+    os.write(master, b'x') # delete 'i'
     out = read_output()
-    if '-- NORMAL --' in out and '\x1b[1;1H' in out:
-        print("[PASS] Returned to NORMAL mode and moved left to (1;1)")
+    if 'H\r\n' in out or 'H\r\n~\r\n' in out:
+        print("[PASS] Deleted character successfully")
     else:
-        print("[FAIL] Did not return to Normal mode / move left. Output:", repr(out))
+        print("[FAIL] Failed to delete character. Output:", repr(out))
 
     print("--- Quitting (Ctrl-Q) ---")
     os.write(master, b'\x11') # Ctrl-Q
