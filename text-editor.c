@@ -7,17 +7,26 @@
 #include <unistd.h>
 #include <errno.h>
 #include <sys/ioctl.h>
+#include <string.h>
 
 // DEFINES
 #define CTRL_KEY(k) ((k) & 0x1f)
+#define ESC_KEY '\x1b'
+
+enum editorMode {
+  NORMAL = 0,
+  INSERT = 1
+};
 
 // STRUCTS
 
 struct termios orig_termios;
 
 struct config {
+  int cx, cy;
   int screenRows;
   int screenCols;
+  int mode;
   struct termios orig_termios;
 };
 
@@ -55,7 +64,6 @@ void enableRawMode() {
   raw.c_cc[VMIN] = 0;
   raw.c_cc[VTIME] = 1;
 
-
   if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1)
     die("tcsetattr");
 }
@@ -81,21 +89,20 @@ int getCursor(int* rows, int* cols) {
     if (buf[i] == 'R') break;
     i++;
   }
-
   buf[i] = '\0';
 
-  printf("\r\n&buf[1]: '%s'\r\n", &buf[1]);
-  readKey();
-  return -1;
+  if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+  if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+
+  return 0;
 }
 
 int getWindowSize(int* rows, int* cols) {
   struct winsize ws;
 
-  if (1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) { // Terminal Input/Output Control Get WIN SiZe
-    if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;    // moves the cursor right by 999 and down by 999 without going off screen, fallback windowSize method if ioctl isn't suppoerted
-    readKey();
-    return -1;
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+    if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) return -1;
+    return getCursor(rows, cols);
   } else {
     *cols = ws.ws_col;
     *rows = ws.ws_row;
@@ -108,7 +115,10 @@ int getWindowSize(int* rows, int* cols) {
 void drawRows() {
   int y;
   for (y=0; y<E.screenRows; y++) {
-    write(STDOUT_FILENO, "~\r\n", 3);
+    write(STDOUT_FILENO, "~", 1);
+    if (y < E.screenRows - 1) {
+      write(STDOUT_FILENO, "\r\n", 2);
+    }
   }
 }
 
@@ -121,24 +131,69 @@ void refreshEditor() {
   write(STDOUT_FILENO, "\x1b[H", 3);
 
   drawRows();
-  write(STDOUT_FILENO, "\x1b[H", 3);
+  
+  char buf[32];
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+  write(STDOUT_FILENO, buf, strlen(buf));
 }
 
 // INPUT
 
+void moveCursor(char key) {
+  switch (key) {
+    case 'h':
+      if (E.cx > 0) E.cx--;
+      break;
+    case 'l':
+      if (E.cx < E.screenCols - 1) E.cx++;
+      break;
+    case 'k':
+      if (E.cy > 0) E.cy--;
+      break;
+    case 'j':
+      if (E.cy < E.screenRows - 1) E.cy++;
+      break;
+  }
+}
+
 void processKeypress() {
   char c = readKey();
 
-  switch (c) {
-    case CTRL_KEY('q'):
-    write(STDOUT_FILENO, "\x1b[2J", 4);
-    write(STDOUT_FILENO, "\x1b[H", 3);
-    exit(0);
-    break;
+  if (E.mode == NORMAL) {
+    switch (c) {
+      case CTRL_KEY('q'):
+        write(STDOUT_FILENO, "\x1b[2J", 4);
+        write(STDOUT_FILENO, "\x1b[H", 3);
+        exit(0);
+        break;
+      case 'i':
+        E.mode = INSERT;
+        break;
+      case 'h':
+      case 'j':
+      case 'k':
+      case 'l':
+        moveCursor(c);
+        break;
+    }
+  } else if (E.mode == INSERT) {
+    switch (c) {
+      case ESC_KEY:
+        E.mode = NORMAL;
+        break;
+      case CTRL_KEY('q'): // Allow quitting in insert mode too for convenience
+        write(STDOUT_FILENO, "\x1b[2J", 4);
+        write(STDOUT_FILENO, "\x1b[H", 3);
+        exit(0);
+        break;
+    }
   }
 }
 
 void init() {
+  E.cx = 0;
+  E.cy = 0;
+  E.mode = NORMAL;
   if (getWindowSize(&E.screenRows, &E.screenCols) == -1) die("getWindowSize");
 }
 
