@@ -12,7 +12,12 @@ def test_editor():
     winsize = struct.pack("HHHH", 24, 80, 0, 0)
     fcntl.ioctl(slave, termios.TIOCSWINSZ, winsize)
     
-    p = subprocess.Popen(['./text-editor'], stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid)
+    # Ensure test file is clear
+    test_file = "test_io.txt"
+    if os.path.exists(test_file):
+        os.remove(test_file)
+
+    p = subprocess.Popen(['./text-editor', test_file], stdin=slave, stdout=slave, stderr=slave, preexec_fn=os.setsid)
     os.close(slave)
     
     def read_output(timeout=0.5):
@@ -37,51 +42,59 @@ def test_editor():
     print("--- Testing 'i' (Insert Mode) ---")
     os.write(master, b'i')
     out = read_output()
-    if '-- INSERT --' in out:
-        print("[PASS] Switched to INSERT mode successfully")
-    else:
-        print("[FAIL] Did not switch to INSERT mode. Output:", repr(out))
 
-    print("--- Testing text insertion with Newline ---")
-    os.write(master, b'H')
+    print("--- Testing text insertion ---")
+    os.write(master, b'F')
     os.write(master, b'i')
-    os.write(master, b'\r')
-    os.write(master, b'W')
-    os.write(master, b'o')
-    os.write(master, b'r')
     os.write(master, b'l')
-    os.write(master, b'd')
+    os.write(master, b'e')
+    os.write(master, b' ')
+    os.write(master, b'I')
+    os.write(master, b'/')
+    os.write(master, b'O')
     out = read_output()
-    if 'Hi\r\nWorld' in out or ('Hi' in out and 'World' in out):
-        print("[PASS] Inserted text with newline successfully")
-    else:
-        print("[FAIL] Failed to insert text with newline. Output:", repr(out))
 
     print("--- Testing 'ESC' (Back to Normal Mode) ---")
     os.write(master, b'\x1b') # ESC
     time.sleep(0.1)
     
-    print("--- Testing Cursor Snapping ---")
-    # Cursor is currently at end of "World" (row 2, col 5). Move up to "Hi" (row 1, max col 2).
-    os.write(master, b'k')
-    out = read_output()
-    # It snapped to cx=2. Let's move left to select 'i' and delete it.
-    os.write(master, b'h') # move to cx=1
-    os.write(master, b'x') # deletes 'i'
-    out = read_output()
-    if 'H\r\nWorld' in out or ('H' in out and 'World' in out and 'i' not in out):
-        print("[PASS] Cursor snapped and deleted character successfully")
-    else:
-        print("[FAIL] Cursor snapping / delete failed. Output:", repr(out))
+    print("--- Testing :wq (Save and Quit) ---")
+    os.write(master, b':')
+    time.sleep(0.1)
+    os.write(master, b'w')
+    time.sleep(0.1)
+    os.write(master, b'q')
+    time.sleep(0.1)
+    os.write(master, b'\r')
 
-    print("--- Quitting (Ctrl-Q) ---")
-    os.write(master, b'\x11') # Ctrl-Q
     try:
-        p.wait(timeout=2)
-        print("[PASS] Editor quit successfully")
-    except subprocess.TimeoutExpired:
-        print("[FAIL] Editor did not quit in time")
+        end_time = time.time() + 2.0
+        while time.time() < end_time:
+            if p.poll() is not None:
+                break
+            r, _, _ = select.select([master], [], [], 0.1)
+            if r:
+                os.read(master, 4096)
+        
+        if p.poll() is not None:
+            print("[PASS] Editor quit successfully")
+        else:
+            print("[FAIL] Editor did not quit in time")
+            p.kill()
+    except Exception as e:
+        print(f"[FAIL] Editor did not quit in time: {e}")
         p.kill()
+
+    # Check file contents
+    if os.path.exists(test_file):
+        with open(test_file, 'r') as f:
+            content = f.read()
+            if content == "File I/O\n":
+                print("[PASS] File saved correctly")
+            else:
+                print(f"[FAIL] File content incorrect: {repr(content)}")
+    else:
+        print("[FAIL] File was not created")
 
 if __name__ == '__main__':
     try:

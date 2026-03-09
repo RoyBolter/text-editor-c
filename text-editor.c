@@ -34,6 +34,7 @@ struct config {
   int numrows;
   erow *row;
   int mode;
+  char *filename;
   struct termios orig_termios;
 };
 
@@ -106,6 +107,38 @@ void editorDelCharUnder() {
   erow *row = &E.row[E.cy];
   if (E.cx >= row->size) return;
   editorRowDelChar(row, E.cx);
+}
+
+// FILE I/O
+
+void editorOpen(char *filename) {
+  free(E.filename);
+  E.filename = strdup(filename);
+
+  FILE *fp = fopen(filename, "r");
+  if (!fp) return;
+
+  char *line = NULL;
+  size_t linecap = 0;
+  ssize_t linelen;
+  while ((linelen = getline(&line, &linecap, fp)) != -1) {
+    while (linelen > 0 && (line[linelen - 1] == '\n' || line[linelen - 1] == '\r'))
+      linelen--;
+    editorAppendRow(line, linelen);
+  }
+  free(line);
+  fclose(fp);
+}
+
+void editorSave() {
+  if (E.filename == NULL) return;
+  FILE *fp = fopen(E.filename, "w");
+  if (!fp) return;
+  int i;
+  for (i = 0; i < E.numrows; i++) {
+    fprintf(fp, "%s\n", E.row[i].chars);
+  }
+  fclose(fp);
 }
 
 // TERMINAL FUNCTIONS
@@ -261,11 +294,46 @@ void processKeypress() {
         write(STDOUT_FILENO, "\x1b[H", 3);
         exit(0);
         break;
+      case CTRL_KEY('s'):
+        editorSave();
+        break;
       case 'i':
         E.mode = INSERT;
         break;
       case 'x':
         editorDelCharUnder();
+        break;
+      case ':':
+        {
+          // Very basic command line reading
+          char cmd[32];
+          int cmd_len = 0;
+          while (1) {
+            char c = readKey();
+            if (c == ESC_KEY) {
+              break;
+            } else if (c == '\r') {
+              cmd[cmd_len] = '\0';
+              if (strcmp(cmd, "w") == 0) {
+                editorSave();
+              } else if (strcmp(cmd, "q") == 0) {
+                write(STDOUT_FILENO, "\x1b[2J", 4);
+                write(STDOUT_FILENO, "\x1b[H", 3);
+                exit(0);
+              } else if (strcmp(cmd, "wq") == 0) {
+                editorSave();
+                write(STDOUT_FILENO, "\x1b[2J", 4);
+                write(STDOUT_FILENO, "\x1b[H", 3);
+                exit(0);
+              }
+              break;
+            } else if (c == 127 || c == CTRL_KEY('h')) {
+              if (cmd_len > 0) cmd_len--;
+            } else if (!iscntrl(c) && cmd_len < 31) {
+              cmd[cmd_len++] = c;
+            }
+          }
+        }
         break;
       case 'h':
       case 'j':
@@ -285,6 +353,9 @@ void processKeypress() {
         break;
       case '\r':
         editorInsertNewline();
+        break;
+      case CTRL_KEY('s'):
+        editorSave();
         break;
       case CTRL_KEY('q'): // Allow quitting in insert mode too for convenience
         write(STDOUT_FILENO, "\x1b[2J", 4);
@@ -306,14 +377,18 @@ void init() {
   E.numrows = 0;
   E.row = NULL;
   E.mode = NORMAL;
+  E.filename = NULL;
   if (getWindowSize(&E.screenRows, &E.screenCols) == -1) die("getWindowSize");
 }
 
 // MAIN
 
-int main() {
+int main(int argc, char *argv[]) {
   enableRawMode();
   init();
+  if (argc >= 2) {
+    editorOpen(argv[1]);
+  }
 
   while (1) {
     refreshEditor();
